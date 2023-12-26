@@ -1,0 +1,140 @@
+var LandsatLST = require('users/sofiaermida/landsat_smw_lst:modules/Landsat_LST.js')
+var BBE = require('users/sofiaermida/landsat_smw_lst:modules/broadband_emiss.js')
+var dataset = ee.FeatureCollection("FAO/GAUL/2015/level2");
+
+Map.setCenter(90.4125,23.8103 , 5);
+
+var styleParams = {
+  fillColor: 'b5ffb4',
+  color: '00909F',
+  width: 1.0,
+};
+
+dataset = dataset.style(styleParams);
+
+Map.addLayer(dataset, {}, 'Second Level Administrative Units');
+
+var region = ee.Geometry.Polygon(
+90.00835265547083,23.633867825806803,
+90.04474486738489,23.628206219679946,
+90.05023803144739,23.57535276591888,
+90.13709868818567,23.565283027083975,
+90.16490783125208,23.523422405971512,
+90.28507079511927,23.673177779844842,
+90.34686889082239,23.639214673484364,
+90.36815490156458,23.651165660903327,
+90.43201293379114,23.615938566823484,
+90.47527160078333,23.637327575710177,
+90.45055236250208,23.674435503274683,
+90.51372374922083,23.709018152406138,
+90.47595824629114,23.781297702409496,
+90.46222533613489,23.88807214592179,
+90.44299926191614,23.89811697622122,
+90.34961547285364,23.88430513345356,
+90.33725585371302,23.957114588828635,
+90.25348510175989,23.9797022767041,
+90.25348510175989,24.02486576913453,
+90.23425902754114,24.033645717894874,
+90.23288573652552,24.008558558919937,
+90.17520751386927,24.002286004410642,
+90.14224852949427,24.031137222316357,
+90.10654296308802,24.018594009950103,
+90.07633056074427,24.04117091077162,
+90.02139892011927,24.021102750340344,
+90.01315917402552,24.043679210431424,
+90.01453246504114,24.006049573814376,
+90.05161132246302,23.996013144115633,
+90.04199828535364,23.96715404994723,
+90.07633056074427,23.958369564222703,
+90.06397094160364,23.904394598956596,
+90.09967650800989,23.903139098795045,
+90.15048827558802,23.826530549849306,
+90.18207396894739,23.815223814985536,
+90.21915282636927,23.840348554424185,
+90.24799193769739,23.835323995819696,
+90.22327269941614,23.746105714756503,
+90.25897826582239,23.71341892328457,
+90.21640624433802,23.710904215246632,
+90.16284789472864,23.72222001961868,
+90.15323485761927,23.747362735310425,
+90.10928954511927,23.715933582843373,
+90.05023803144739,23.723477270606107,
+90.00835265547083,23.633867825806803);
+// Create 1000 random points in the region.
+var randomPoints = ee.FeatureCollection.randomPoints(region);
+
+// Display the points.
+Map.centerObject(randomPoints);
+Map.addLayer(randomPoints, {}, 'random points');
+
+var site = ee.Geometry.Point([90.4125,23.8103]);
+var geometry = site.buffer(30);
+var date_start = '1982-08-01';
+var date_end = '2020-01-31';
+var use_ndvi = true;
+
+var L8coll = LandsatLST.collection('L8', date_start, date_end, geometry, use_ndvi);
+var L7coll = LandsatLST.collection('L7', date_start, date_end, geometry, use_ndvi);
+var L5coll = LandsatLST.collection('L5', date_start, date_end, geometry, use_ndvi);
+var L4coll = LandsatLST.collection('L4', date_start, date_end, geometry, use_ndvi);
+
+L8coll = L8coll.map(BBE.addBand(true))
+L7coll = L7coll.map(BBE.addBand(true))
+L5coll = L5coll.map(BBE.addBand(true))
+L4coll = L4coll.map(BBE.addBand(true))
+
+var getband = function(landsat, bandname){
+  var wrap = function(image){
+    return image.select(bandname).rename(bandname.concat('_').concat(landsat))
+  }
+  return wrap
+}
+
+var bandname = 'LST'
+var LandsatColl = L8coll.map(getband('L8',bandname));
+LandsatColl = LandsatColl.merge(L7coll.map(getband('L7',bandname)));
+LandsatColl = LandsatColl.merge(L5coll.map(getband('L5',bandname)));
+LandsatColl = LandsatColl.merge(L4coll.map(getband('L4',bandname)));
+var TimeSeries = ui.Chart.image.series(
+    LandsatColl, geometry, ee.Reducer.mean(), 30, 'system:time_start')
+        .setChartType('ScatterChart')
+        .setOptions({
+          vAxis: {title: bandname},
+          lineWidth: 1,
+          pointSize: 4
+});
+print(TimeSeries)
+
+var myFeatures = ee.FeatureCollection(L8coll.map(function(image){
+  var date = ee.Date(image.get('system:time_start'));
+  var lst = image.select('LST')
+  var em = image.select('EM')
+  var fvc = image.select('FVC')
+  var tpw = image.select('TPW')
+  var bbe = image.select('BBE')
+  return ee.Feature(site, {
+    'year':ee.Number(date.get('year')), 
+    'month':ee.Number(date.get('month')),
+    'day':ee.Number(date.get('day')),
+    'hour':ee.Number(date.get('hour')),
+    'minute':ee.Number(date.get('minute')),
+    'lst':ee.Number(lst.reduceRegion(
+      ee.Reducer.mean(),geometry,30).get('LST')),
+    'tpw':ee.Number(tpw.reduceRegion(
+      ee.Reducer.mean(),geometry,30).get('TPW')),
+    'em':ee.Number(em.reduceRegion(
+      ee.Reducer.mean(),geometry,30).get('EM')),
+    'fvc':ee.Number(fvc.reduceRegion(
+      ee.Reducer.mean(),geometry,30).get('FVC')),
+    'bbe':ee.Number(bbe.reduceRegion(
+      ee.Reducer.mean(),geometry,30).get('BBE'))
+  });
+}));
+Export.table.toDrive({
+  collection: myFeatures,
+  description: 'MyTask',
+  folder: 'MyFolder',
+  fileNamePrefix: 'Landsat8_LST_timeseries', 
+  fileFormat: 'CSV'
+});
+
